@@ -1,0 +1,12 @@
+# ignore git and builds
+.git
+.gitmodules
+build/
+*.uf2
+*.o
+*.elf
+*.bin
+*.exe
+node_modules/
+.vscode/
+__pycache__/

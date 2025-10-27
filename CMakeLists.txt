@@ -61,7 +61,7 @@ add_executable(clinic_checkin
     src/system_init.c
     src/core/state_machine.c
     src/core/event_handler.c
-    src/drivers/ST7789_display.c
+    src/drivers/ST7796_display.c
     src/drivers/gm67_qr.c
     src/drivers/r307s_fingerprint.c
     src/drivers/sdcard_spi.c

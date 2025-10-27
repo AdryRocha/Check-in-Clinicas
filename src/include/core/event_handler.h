@@ -1,18 +1,29 @@
 #ifndef EVENT_HANDLER_H
 #define EVENT_HANDLER_H
 
-// Enumeração de todos os eventos possíveis no sistema
-typedef enum {
-    EVENT_NONE,
-    EVENT_QR_DETECTED,
-    EVENT_FP_DETECTED,
-    EVENT_TIMEOUT,
-} system_event_t;
+#include <stdint.h>
 
-/**
- * @brief Ponto de entrada para o Core 1.
- * Este loop infinito é responsável por sondar os sensores e enviar eventos para o Core 0.
- */
-void core1_entry();
+typedef enum {
+    EV_NONE,
+    EV_SYSTEM_START,
+    EV_QR_CODE_SCANNED,
+    EV_FINGER_DETECTED,
+    EV_AUTH_SUCCESS,
+    EV_AUTH_FAILURE,
+    EV_TIMEOUT,
+    // Adicionar mais eventos conforme necessário
+} event_type_t;
+
+typedef struct {
+    event_type_t type;
+    union {
+        char qr_data;
+        uint16_t finger_id;
+    } payload;
+} event_t;
+
+void event_handler_init(void);
+void event_post(const event_t *event);
+bool event_get(event_t *event);
 
 #endif // EVENT_HANDLER_H

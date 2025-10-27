@@ -1,28 +1,45 @@
 #include "event_handler.h"
-#include "pico/multicore.h"
-#include "gm67_qr.h"
-#include "r307s_fingerprint.h"
+#include "pico/stdlib.h"
+#include "pico/critical_section.h"
+#include <string.h>
 
-void core1_entry() {
-    while (1) {
-        // Verifica se há dados do leitor de QR code
-        if (gm67_has_data()) {
-            // Envia um evento para o Core 0 indicando que um QR code foi lido
-            multicore_fifo_push_blocking(EVENT_QR_DETECTED);
-            // Aguarda um pouco para evitar múltiplos eventos para a mesma leitura
-            sleep_ms(500); 
-        }
+#define EVENT_QUEUE_SIZE 16
 
-        // Verifica se um dedo foi colocado no sensor
-        // Nota: A implementação de r307s_is_finger_present é bloqueante e não ideal
-        // para polling. Uma solução de produção usaria um pino de interrupção
-        // ou um modo de detecção de baixo consumo do sensor, se disponível.
-        // if (r307s_is_finger_present()) {
-        //     multicore_fifo_push_blocking(EVENT_FP_DETECTED);
-        //     sleep_ms(500);
-        // }
-        
-        // Pequeno atraso para não sobrecarregar o barramento
-        sleep_ms(20);
+static event_t event_queue;
+static volatile uint8_t queue_head = 0;
+static volatile uint8_t queue_tail = 0;
+
+static critical_section_t queue_crit_sec;
+
+void event_handler_init(void) {
+    critical_section_init(&queue_crit_sec);
+}
+
+void event_post(const event_t *event) {
+    critical_section_enter_blocking(&queue_crit_sec);
+    
+    uint8_t next_head = (queue_head + 1) % EVENT_QUEUE_SIZE;
+    if (next_head!= queue_tail) {
+        event_queue[queue_head] = *event;
+        queue_head = next_head;
     }
+    // else: a fila está cheia, o evento é descartado.
+    // Em uma aplicação real, um log de erro seria apropriado aqui.
+    
+    critical_section_exit(&queue_crit_sec);
+}
+
+bool event_get(event_t *event) {
+    critical_section_enter_blocking(&queue_crit_sec);
+    
+    if (queue_head == queue_tail) {
+        critical_section_exit(&queue_crit_sec);
+        return false; // Fila vazia
+    }
+    
+    *event = event_queue[queue_tail];
+    queue_tail = (queue_tail + 1) % EVENT_QUEUE_SIZE;
+    
+    critical_section_exit(&queue_crit_sec);
+    return true;
 }

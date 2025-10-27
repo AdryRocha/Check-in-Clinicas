@@ -1,148 +1,113 @@
 #include "r307s_fingerprint.h"
+#include "hardware_config.h"
+#include "pico/stdlib.h"
 #include "hardware/uart.h"
 #include <string.h>
 
-// Estrutura de pacote do R307S conforme especificação 
-#pragma pack(1)
-typedef struct {
-    uint16_t header;
-    uint32_t address;
-    uint8_t type;
-    uint16_t length;
-    uint8_t data; // Payload máximo
-} r307s_packet_t;
-#pragma pack()
+static const uint8_t R307S_START_CODE = {0xEF, 0x01};
+static uint32_t r307s_password = 0;
+static uint32_t r307s_address = 0xFFFFFFFF;
 
-static const uint16_t R307S_HEADER = 0xEF01;
-static const uint32_t R307S_ADDRESS = 0xFFFFFFFF;
-
-// Função para enviar um pacote de comando
-static void send_packet(uint8_t type, uint8_t *payload, uint16_t len) {
-    uint8_t packet_buffer[sizeof(r307s_packet_t) + 2];
-    r307s_packet_t *packet = (r307s_packet_t *)packet_buffer;
-
-    packet->header = __builtin_bswap16(R307S_HEADER);
-    packet->address = __builtin_bswap32(R307S_ADDRESS);
-    packet->type = type;
-    packet->length = __builtin_bswap16(len + 2); // Comprimento inclui checksum
-
-    memcpy(packet->data, payload, len);
-
-    uint16_t checksum = type + (len + 2);
-    for (int i = 0; i < len; i++) {
-        checksum += payload[i];
+static void write_packet(uint8_t type, const uint8_t *packet, uint16_t len) {
+    uint16_t sum = 0;
+    uart_write_blocking(UART_FP_ID, R307S_START_CODE, 2);
+    uart_write_blocking(UART_FP_ID, (uint8_t *)&r307s_address, 4);
+    uart_write_blocking(UART_FP_ID, &type, 1);
+    
+    uint16_t length = len + 2;
+    uint8_t len_high = (length >> 8) & 0xFF;
+    uint8_t len_low = length & 0xFF;
+    
+    uart_write_blocking(UART_FP_ID, &len_high, 1);
+    uart_write_blocking(UART_FP_ID, &len_low, 1);
+    
+    sum = type + len_high + len_low;
+    
+    for (uint16_t i = 0; i < len; i++) {
+        uart_write_blocking(UART_FP_ID, &packet[i], 1);
+        sum += packet[i];
     }
-
-    packet_buffer[sizeof(r307s_packet_t) - 32 + len] = (checksum >> 8) & 0xFF;
-    packet_buffer[sizeof(r307s_packet_t) - 32 + len + 1] = checksum & 0xFF;
-
-    uart_write_blocking(FP_UART_ID, packet_buffer, sizeof(r307s_packet_t) - 32 + len + 2);
+    
+    uint8_t sum_high = (sum >> 8) & 0xFF;
+    uint8_t sum_low = sum & 0xFF;
+    
+    uart_write_blocking(UART_FP_ID, &sum_high, 1);
+    uart_write_blocking(UART_FP_ID, &sum_low, 1);
 }
 
-// Função para receber um pacote de resposta
-static bool receive_packet(r307s_packet_t *packet, uint32_t timeout_ms) {
-    uint8_t buffer[sizeof(r307s_packet_t) + 2];
-    uint64_t start_time = time_us_64();
-
+static int read_packet(uint8_t *buffer, uint16_t len, uint16_t timeout) {
     int bytes_read = 0;
-    while (bytes_read < 9 && (time_us_64() - start_time) < (timeout_ms * 1000)) {
-        if (uart_is_readable(FP_UART_ID)) {
-            buffer[bytes_read++] = uart_getc(FP_UART_ID);
+    uint64_t start_time = time_us_64();
+    
+    while ((time_us_64() - start_time) < (timeout * 1000)) {
+        if (uart_is_readable(UART_FP_ID) && bytes_read < len) {
+            buffer[bytes_read++] = uart_getc(UART_FP_ID);
+        }
+        if (bytes_read >= 9) { // Minimum packet size
+            if (buffer!= 0xEF |
+
+| buffer![1]= 0x01) {
+                // Invalid header, reset
+                bytes_read = 0;
+                continue;
+            }
+            uint16_t packet_len = (buffer[2] << 8) | buffer[3];
+            if (bytes_read >= (packet_len + 9)) {
+                return bytes_read;
+            }
         }
     }
-
-    if (bytes_read < 9) return false; // Timeout ou erro
-
-    memcpy(packet, buffer, 9);
-    packet->header = __builtin_bswap16(packet->header);
-    packet->length = __builtin_bswap16(packet->length);
-
-    if (packet->header!= R307S_HEADER) return false;
-
-    uint16_t data_len = packet->length - 2;
-    while (bytes_read < (9 + data_len + 2) && (time_us_64() - start_time) < (timeout_ms * 1000)) {
-         if (uart_is_readable(FP_UART_ID)) {
-            buffer[bytes_read++] = uart_getc(FP_UART_ID);
-        }
-    }
-
-    if (bytes_read < (9 + data_len + 2)) return false; // Timeout
-
-    memcpy(packet->data, buffer + 9, data_len);
-    
-    // Validação do checksum (simplificada para este exemplo)
-    // Uma implementação de produção validaria o checksum aqui.
-    
-    return true;
+    return -1; // Timeout
 }
 
-void r307s_init() {
-    uart_init(FP_UART_ID, FP_BAUD_RATE);
-    gpio_set_function(FP_TX_PIN, GPIO_FUNC_UART);
-    gpio_set_function(FP_RX_PIN, GPIO_FUNC_UART);
-    sleep_ms(500); // Aguarda o sensor inicializar
+void r307s_init(void) {
+    // A UART já foi inicializada
 }
 
-bool r307s_verify_password() {
-    uint8_t payload = {0x13, 0x00, 0x00, 0x00, 0x00}; // Comando VfyPwd
-    send_packet(0x01, payload, sizeof(payload));
+bool r307s_verify_password(void) {
+    uint8_t packet = {0x13, (r307s_password >> 24) & 0xFF, (r307s_password >> 16) & 0xFF, (r307s_password >> 8) & 0xFF, r307s_password & 0xFF};
+    write_packet(0x01, packet, 5);
     
-    r307s_packet_t response;
-    if (receive_packet(&response, 1000) && response.data == R307S_OK) {
-        return true;
+    uint8_t response[4];
+    if (read_packet(response, 12, 500) > 0) {
+        return response[5] == R307S_OK;
     }
     return false;
 }
 
-bool r307s_is_finger_present() {
-    uint8_t payload = {0x2B}; // Comando GenImg
-    send_packet(0x01, payload, sizeof(payload));
-
-    r307s_packet_t response;
-    if (receive_packet(&response, 200)) {
-        // O comando GenImg retorna OK se um dedo for detectado.
-        // Se não houver dedo, ele retorna NO_FINGER após um timeout interno.
-        // Para uma detecção não bloqueante, este método não é ideal.
-        // A especificação  sugere uma verificação simples no Core 1,
-        // o que implica que o sensor pode ter um pino de detecção ou um modo de polling rápido.
-        // Para este driver, simulamos com um timeout curto.
-        return response.data == R307S_OK;
-    }
-    return false;
-}
-
-uint8_t r307s_capture_image() {
-    uint8_t payload = {0x01}; // Comando GenImg
-    send_packet(0x01, payload, sizeof(payload));
+uint8_t r307s_get_image(void) {
+    uint8_t packet = {0x01};
+    write_packet(0x01, packet, 1);
     
-    r307s_packet_t response;
-    if (receive_packet(&response, 2000)) {
-        return response.data;
+    uint8_t response[4];
+    if (read_packet(response, 12, 1000) > 0) {
+        return response[5];
     }
-    return R307S_PACKET_RESPONSE_FAIL;
+    return R307S_ERROR_COMM;
 }
 
-uint8_t r307s_create_template() {
-    uint8_t payload = {0x02, 0x01}; // Comando Img2Tz no CharBuffer1
-    send_packet(0x01, payload, sizeof(payload));
+uint8_t r307s_image_to_tz(uint8_t slot) {
+    uint8_t packet = {0x02, slot};
+    write_packet(0x01, packet, 2);
     
-    r307s_packet_t response;
-    if (receive_packet(&response, 1000)) {
-        return response.data;
+    uint8_t response[4];
+    if (read_packet(response, 12, 1000) > 0) {
+        return response[5];
     }
-    return R307S_PACKET_RESPONSE_FAIL;
+    return R307S_ERROR_COMM;
 }
 
-bool r307s_match_template(uint8_t template_id, uint16_t *confidence) {
-    uint8_t payload = {0x04, 0x01, (uint8_t)(template_id >> 8), (uint8_t)template_id}; // Comando Search
-    send_packet(0x01, payload, sizeof(payload));
-
-    r307s_packet_t response;
-    if (receive_packet(&response, 1000) && response.data == R307S_OK) {
-        if (confidence) {
-            *confidence = (response.data << 8) | response.data;
+uint8_t r307s_search_finger(uint16_t *finger_id, uint16_t *score) {
+    uint8_t packet = {0x04, 0x01, 0x00, 0x00, 0x00, 0xA3}; // Search buffer 1 from 0 to 163
+    write_packet(0x01, packet, 6);
+    
+    uint8_t response[6];
+    if (read_packet(response, 16, 1000) > 0) {
+        if (response[5] == R307S_OK) {
+            *finger_id = (response[7] << 8) | response[8];
+            *score = (response[4] << 8) | response[9];
         }
-        return true;
+        return response[5];
     }
-    return false;
+    return R307S_ERROR_COMM;
 }
