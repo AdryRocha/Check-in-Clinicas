@@ -1,4 +1,4 @@
-#include "ui_manager.h"
+#include "ui/ui_manager.h"
 #include "lvgl.h"
 
 // Funções auxiliares para criar elementos de UI

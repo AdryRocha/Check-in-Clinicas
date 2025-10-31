@@ -1,4 +1,4 @@
-#include "network_sync.h"
+#include "services/network_sync.h"
 #include <stdio.h>
 
 bool network_sync_checkin_record(const checkin_record_t* record) {

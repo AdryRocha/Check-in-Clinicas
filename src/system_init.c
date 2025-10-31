@@ -2,6 +2,10 @@
 #include "hardware/spi.h"
 #include "hardware/uart.h"
 #include "hardware/gpio.h"
+#include "hardware/clocks.h" // Para set_sys_clock_khz
+#include "hardware/rtc.h"    // Para rtc_init
+#include "include/hardware_config.h" // Para PIN_SPI_SCK, SPI_PORT, WIFI_SSID, etc.
+#include "services/network_sync.h"  // Para sync_connect_wifi
 //#include "st7796_display.h"
 //#include "gm67_qr.h"
 //#include "r307s_fingerprint.h"
@@ -61,11 +65,11 @@ void system_init(void) {
     gpio_init(PIN_SD_CS);
     gpio_set_dir(PIN_SD_CS, GPIO_OUT);
     gpio_put(PIN_SD_CS, 1); // CS em estado inativo (alto)
-}
+
     
     // Conecta ao Wi-Fi e sincroniza o tempo
     if (sync_connect_wifi(WIFI_SSID, WIFI_PASSWORD)) {
         rtc_init();
         sync_update_rtc_from_ntp();
     }
-}
+

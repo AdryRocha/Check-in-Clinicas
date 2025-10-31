@@ -1,4 +1,4 @@
-#include "data_storage.h"
+#include "services/data_storage.h"
 #include "ff.h"
 #include <string.h>
 #include <stdio.h>
@@ -20,9 +20,10 @@ bool storage_find_user_by_id(const char* id, user_t* user) {
     char line;
     while (f_gets(line, sizeof(line), &fil)) {
         // Formato CSV esperado: user_id,fingerprint_id,name
-        char read_id;
+        char read_id[64];
         int fp_id;
-        char name;
+        char line[512];
+        char name[128];
         
         if (sscanf(line, "%63[^,],%d,%127[^\n]", read_id, &fp_id, name) == 3) {
             if (strcmp(id, read_id) == 0) {

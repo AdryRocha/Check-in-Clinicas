@@ -1,0 +1,29 @@
+{
+    "name": "Pico Clinic Check-in Dev",
+    "build": {
+        "dockerfile": "./Dockerfile",
+        "context": ".."
+    },
+    "postCreateCommand": "git config --global --add safe.directory ${containerWorkspaceFolder}",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-vscode.cpptools",
+                "ms-vscode.cmake-tools",
+                "raspberry-pi.raspberry-pi-pico",
+                "ms-vscode.serial-monitor",
+                "bierner.markdown-mermaid",
+                "marus25.cortex-debug"
+            ],
+            "settings": {
+                "cmake.configureOnOpen": true,
+                "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools"
+            }
+        }
+    },
+    "runArgs": ["--privileged"],
+    "remoteUser": "vscode",
+    "mounts": [
+        "source=/dev,target=/dev,type=bind"
+    ]
+}

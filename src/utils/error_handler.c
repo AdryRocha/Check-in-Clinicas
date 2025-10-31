@@ -1,4 +1,4 @@
-#include "error_handler.h"
+#include "utils/error_handler.h"
 #include "pico/stdlib.h"
 #include "lvgl.h"
 #include <stdio.h>

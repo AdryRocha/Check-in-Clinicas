@@ -1,45 +1,51 @@
-#include "event_handler.h"
+// event_handler.c (IMPLEMENTAÇÃO NECESSÁRIA)
+#include "core/event_handler.h"
 #include "pico/stdlib.h"
-#include "pico/critical_section.h"
+#include "pico/sync.h"
 #include <string.h>
 
 #define EVENT_QUEUE_SIZE 16
 
-static event_t event_queue;
-static volatile uint8_t queue_head = 0;
-static volatile uint8_t queue_tail = 0;
+typedef struct {
+    event_t events[EVENT_QUEUE_SIZE];
+    volatile uint8_t head;
+    volatile uint8_t tail;
+    mutex_t mutex;
+} event_queue_t;
 
-static critical_section_t queue_crit_sec;
+static event_queue_t event_queue;
 
 void event_handler_init(void) {
-    critical_section_init(&queue_crit_sec);
+    event_queue.head = 0;
+    event_queue.tail = 0;
+    mutex_init(&event_queue.mutex);
 }
 
 void event_post(const event_t *event) {
-    critical_section_enter_blocking(&queue_crit_sec);
+    mutex_enter_blocking(&event_queue.mutex);
     
-    uint8_t next_head = (queue_head + 1) % EVENT_QUEUE_SIZE;
-    if (next_head!= queue_tail) {
-        event_queue[queue_head] = *event;
-        queue_head = next_head;
+    uint8_t next_head = (event_queue.head + 1) % EVENT_QUEUE_SIZE;
+    
+    if (next_head != event_queue.tail) {
+        memcpy(&event_queue.events[event_queue.head], event, sizeof(event_t));
+        event_queue.head = next_head;
     }
-    // else: a fila está cheia, o evento é descartado.
-    // Em uma aplicação real, um log de erro seria apropriado aqui.
     
-    critical_section_exit(&queue_crit_sec);
+    mutex_exit(&event_queue.mutex);
 }
 
 bool event_get(event_t *event) {
-    critical_section_enter_blocking(&queue_crit_sec);
+    bool has_event = false;
     
-    if (queue_head == queue_tail) {
-        critical_section_exit(&queue_crit_sec);
-        return false; // Fila vazia
+    mutex_enter_blocking(&event_queue.mutex);
+    
+    if (event_queue.tail != event_queue.head) {
+        memcpy(event, &event_queue.events[event_queue.tail], sizeof(event_t));
+        event_queue.tail = (event_queue.tail + 1) % EVENT_QUEUE_SIZE;
+        has_event = true;
     }
     
-    *event = event_queue[queue_tail];
-    queue_tail = (queue_tail + 1) % EVENT_QUEUE_SIZE;
+    mutex_exit(&event_queue.mutex);
     
-    critical_section_exit(&queue_crit_sec);
-    return true;
+    return has_event;
 }
