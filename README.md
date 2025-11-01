@@ -1,0 +1,1 @@
+Este projeto foi organizado com Issues e Pull Requests.
