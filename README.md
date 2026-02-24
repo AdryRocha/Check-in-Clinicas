@@ -1,1 +1,1 @@
-Este projeto foi organizado com Issues e Pull Requests.
+Este projeto É PARA TESTES em linguagem C.
